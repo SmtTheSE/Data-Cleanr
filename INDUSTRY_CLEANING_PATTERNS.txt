@@ -1,0 +1,127 @@
+Data Cleaning Patterns by Industry for DataCleanr
+===============================================
+
+1. Retail / E-commerce Industry
+------------------------------
+Common Data Issues:
+- Duplicate customer records
+- Inconsistent address formats
+- Invalid phone numbers
+- Missing product categories
+- Pricing anomalies
+- Seasonal sales data inconsistencies
+- Customer behavioral data noise
+
+Cleaning Patterns:
+- Deduplication of customer records based on name, email, phone
+- Address standardization and validation
+- Phone number format normalization
+- Product category harmonization
+- Outlier detection for pricing data
+- Time-series smoothing for sales data
+- Behavioral data filtering and aggregation
+
+2. Finance / Banking
+--------------------
+Common Data Issues:
+- Inconsistent transaction formats
+- Missing or invalid account information
+- Suspicious transaction patterns
+- Regulatory compliance data issues
+- Currency conversion inconsistencies
+- Date/time format variations
+- Risk scoring data quality problems
+
+Cleaning Patterns:
+- Transaction format standardization
+- Account number validation and masking
+- Fraud pattern detection
+- Compliance data formatting
+- Currency normalization
+- DateTime harmonization
+- Risk score validation
+
+3. Healthcare
+-------------
+Common Data Issues:
+- Patient data privacy concerns
+- Inconsistent medical codes (ICD, CPT)
+- Missing diagnosis or treatment data
+- Laboratory result format variations
+- Patient demographic inconsistencies
+- Medical device data integration issues
+- Appointment scheduling data problems
+
+Cleaning Patterns:
+- HIPAA-compliant data anonymization
+- Medical code standardization
+- Missing data imputation using medical logic
+- Laboratory result unit normalization
+- Demographic data validation
+- Device data format harmonization
+- Appointment data consolidation
+
+4. Manufacturing
+----------------
+Common Data Issues:
+- Sensor data noise and outliers
+- Inconsistent units of measurement
+- Equipment downtime data gaps
+- Production quality metrics inconsistencies
+- Supply chain data format variations
+- Maintenance log data quality issues
+- Inventory tracking discrepancies
+
+Cleaning Patterns:
+- Sensor data smoothing and outlier removal
+- Unit standardization across all metrics
+- Downtime data interpolation
+- Quality metrics normalization
+- Supply chain data integration
+- Maintenance log standardization
+- Inventory reconciliation algorithms
+
+5. Demand Planning / Business Forecasting
+----------------------------------------
+Common Data Issues:
+- Historical sales data gaps
+- Seasonal pattern inconsistencies
+- Promotional effect data quality
+- Market condition data integration
+- Competitor data format issues
+- Economic indicator data problems
+- Customer segmentation data issues
+
+Cleaning Patterns:
+- Time series gap filling
+- Seasonal adjustment algorithms
+- Promotion impact normalization
+- Market data standardization
+- Competitor data harmonization
+- Economic indicator alignment
+- Customer segment validation
+
+Implementation Plan for DataCleanr
+==================================
+
+1. Domain Detection Algorithm:
+   - Analyze column names for industry-specific keywords
+   - Examine data patterns and distributions
+   - Identify data types and formats typical for each industry
+
+2. Industry-Specific Cleaning Suggestions:
+   - Based on detected domain, provide relevant cleaning options
+   - Offer industry-standard algorithms for data processing
+   - Provide domain-specific validation rules
+
+3. Enhanced Auto-Detection Features:
+   - Detect industry-specific data patterns
+   - Suggest domain-appropriate cleaning steps
+   - Recommend industry best practices
+
+4. New API Endpoints:
+   - /api/detect-domain - Identify likely industry domain
+   - /api/industry-suggestions - Get industry-specific cleaning suggestions
+   - Enhanced /api/suggest with domain awareness
+
+This enhancement will make DataCleanr more intelligent by providing context-aware cleaning suggestions based on the type of data being processed, rather than generic cleaning operations.
