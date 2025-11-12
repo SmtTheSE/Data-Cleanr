@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -35,6 +35,7 @@ const Visualization = ({ rawData, cleanedData }) => {
   const [chartData, setChartData] = useState(null);
   const [chartOptions, setChartOptions] = useState({});
   const [error, setError] = useState('');
+  const chartRef = useRef(null);
 
   // Use cleaned data if available, otherwise use raw data
   const data = cleanedData || rawData;
@@ -282,6 +283,22 @@ const Visualization = ({ rawData, cleanedData }) => {
     });
   };
 
+  // Download chart as PNG
+  const downloadChartAsPNG = () => {
+    if (!chartRef.current) return;
+    
+    // Get the base64 image from the chart
+    const base64Image = chartRef.current.toBase64Image();
+    
+    // Create download link
+    const downloadLink = document.createElement('a');
+    downloadLink.href = base64Image;
+    downloadLink.download = `chart-${chartType}-${xAxis}-vs-${yAxis}.png`;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+  };
+
   // Reset chart when data changes
   useEffect(() => {
     setChartData(null);
@@ -350,10 +367,10 @@ const Visualization = ({ rawData, cleanedData }) => {
           </select>
         </div>
         
-        <div className="flex items-end">
+        <div className="flex items-end space-x-2">
           <button
             onClick={generateChart}
-            className="w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary hover:bg-primary-dark focus:outline-none"
+            className="flex-1 inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary hover:bg-primary-dark focus:outline-none"
           >
             Generate Chart
           </button>
@@ -380,11 +397,22 @@ const Visualization = ({ rawData, cleanedData }) => {
       
       {chartData && (
         <div className="mt-6">
+          <div className="flex justify-end mb-2">
+            <button
+              onClick={downloadChartAsPNG}
+              className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary hover:bg-primary-dark focus:outline-none"
+            >
+              <svg className="-ml-1 mr-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+              </svg>
+              Download Chart
+            </button>
+          </div>
           <div className="h-96">
-            {chartType === 'bar' && <Bar data={chartData} options={chartOptions} />}
-            {chartType === 'line' && <Line data={chartData} options={chartOptions} />}
-            {chartType === 'pie' && <Pie data={chartData} options={chartOptions} />}
-            {chartType === 'scatter' && <Scatter data={chartData} options={chartOptions} />}
+            {chartType === 'bar' && <Bar ref={chartRef} data={chartData} options={chartOptions} />}
+            {chartType === 'line' && <Line ref={chartRef} data={chartData} options={chartOptions} />}
+            {chartType === 'pie' && <Pie ref={chartRef} data={chartData} options={chartOptions} />}
+            {chartType === 'scatter' && <Scatter ref={chartRef} data={chartData} options={chartOptions} />}
           </div>
         </div>
       )}
