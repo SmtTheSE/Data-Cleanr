@@ -7,16 +7,18 @@ import uuid
 import os
 from typing import List, Optional
 import io
+import json
 
 app = FastAPI(title="DataCleanr API")
 
-# Add CORS middleware
+# Add CORS middleware with more specific configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 # In-memory storage for file data
@@ -39,10 +41,11 @@ class IndustryDetectionResponse(BaseModel):
     confidence: float
     features: List[str]
 
-class IndustrySuggestionsResponse(BaseModel):
-    industry: str
-    suggestions: List[str]
-    description: str
+# Add a new model for issue-based cleaning
+class IssueBasedCleanRequest(BaseModel):
+    file_id: str
+    selected_issues: List[str]
+    analysis_report: List[dict]
 
 @app.get("/")
 async def root():
@@ -54,7 +57,7 @@ async def upload_file(file: UploadFile = File(...)):
         # Generate unique file ID
         file_id = str(uuid.uuid4())
         
-        # Read file content
+        # Read file content with larger buffer
         content = await file.read()
         
         # Determine file type and read with pandas
@@ -63,7 +66,7 @@ async def upload_file(file: UploadFile = File(...)):
         elif file.filename.endswith(('.xlsx', '.xls')):
             df = pd.read_excel(io.BytesIO(content))
         else:
-            raise HTTPException(status_code=400, detail="Unsupported file format")
+            raise HTTPException(status_code=400, detail="Unsupported file format. Please upload a CSV or Excel file.")
         
         # Store file data in memory
         file_storage[file_id] = {
@@ -80,7 +83,15 @@ async def upload_file(file: UploadFile = File(...)):
             "columns": list(df.columns)
         }
     
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Unable to decode file. Please ensure it's a valid CSV or Excel file.")
+    except pd.errors.EmptyDataError:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    except pd.errors.ParserError:
+        raise HTTPException(status_code=400, detail="Unable to parse file. Please ensure it's a valid CSV or Excel file.")
     except Exception as e:
+        # Log the error for debugging
+        print(f"Error processing file: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 @app.post("/api/suggest")
@@ -119,10 +130,17 @@ async def suggest_cleaning_steps(file_id: str = Form(...)):
 # New endpoint for industry detection
 @app.post("/api/detect-industry")
 async def detect_industry(file_id: str = Form(...)):
+    return detect_industry_internal(file_id)
+
+def detect_industry_internal(file_id: str):
+    """
+    Internal function to detect industry without being an API endpoint
+    """
     if file_id not in file_storage:
         raise HTTPException(status_code=404, detail="File not found")
     
     df = file_storage[file_id]['data']
+    filename = file_storage[file_id]['filename']
     
     # Analyze column names and data for industry patterns
     column_names = [col.lower() for col in df.columns]
@@ -131,7 +149,8 @@ async def detect_industry(file_id: str = Form(...)):
         "finance_banking": 0,
         "healthcare": 0,
         "manufacturing": 0,
-        "demand_planning": 0
+        "demand_planning": 0,
+        "education": 0
     }
     
     # Check for industry-specific column patterns
@@ -165,6 +184,29 @@ async def detect_industry(file_id: str = Form(...)):
         if any(keyword in col for col in column_names):
             industry_scores["demand_planning"] += 1
     
+    # Education indicators (enhanced with file name/extension checking)
+    education_keywords = ['student', 'course', 'grade', 'score', 'exam', 'assignment', 'gpa', 'degree', 'major', 'faculty', 'department', 'enrollment', 'academic', 'semester', 'tuition']
+    for keyword in education_keywords:
+        if any(keyword in col for col in column_names):
+            industry_scores["education"] += 1
+    
+    # Additional education detection based on file name and extension
+    education_file_indicators = ['course', 'class', 'education', 'school', 'university', 'student', 'academy']
+    education_extensions = ['.csv', '.xlsx', '.xls']
+    
+    # Check if filename contains education-related terms
+    filename_lower = filename.lower()
+    if any(indicator in filename_lower for indicator in education_file_indicators):
+        industry_scores["education"] += 2  # Boost score if filename indicates education
+    
+    # Check for typical course-related column names that might not be explicitly "education" but are common in course sales
+    course_related_columns = ['название курса', 'course', 'название', 'title', 'price', 'цена', 'кол-во', 'quantity', 'total', 'всего', 'sale', 'date', 'дата']
+    course_matches = sum(1 for col in column_names if any(keyword in col for keyword in course_related_columns))
+    
+    # If we have several course-related columns, this might be education data
+    if course_matches >= 3:  # If at least 3 course-related columns are found
+        industry_scores["education"] += 2
+    
     # Determine the industry with highest score
     detected_industry = max(industry_scores, key=industry_scores.get)
     confidence = industry_scores[detected_industry] / max(sum(industry_scores.values()), 1)
@@ -181,6 +223,8 @@ async def detect_industry(file_id: str = Form(...)):
         features = [kw for kw in manufacturing_keywords if any(kw in col for col in column_names)]
     elif detected_industry == "demand_planning":
         features = [kw for kw in demand_keywords if any(kw in col for col in column_names)]
+    elif detected_industry == "education":
+        features = [kw for kw in education_keywords if any(kw in col for col in column_names)]
     
     # Convert industry code to readable format
     industry_mapping = {
@@ -188,11 +232,17 @@ async def detect_industry(file_id: str = Form(...)):
         "finance_banking": "Finance/Banking",
         "healthcare": "Healthcare",
         "manufacturing": "Manufacturing",
-        "demand_planning": "Demand Planning/Business Forecasting"
+        "demand_planning": "Demand Planning/Business Forecasting",
+        "education": "Education"
     }
     
+    # If no industry keywords were detected or confidence is 0, set to General
+    final_industry = "General"
+    if confidence > 0:
+        final_industry = industry_mapping.get(detected_industry, "General")
+    
     return {
-        "industry": industry_mapping.get(detected_industry, "General"),
+        "industry": final_industry,
         "confidence": round(confidence, 2),
         "features": features[:5]  # Top 5 matching features
     }
@@ -203,8 +253,8 @@ async def industry_suggestions(file_id: str = Form(...)):
     if file_id not in file_storage:
         raise HTTPException(status_code=404, detail="File not found")
     
-    # First detect the industry
-    industry_response = await detect_industry(file_id=file_id)
+    # First detect the industry by calling the function directly
+    industry_response = detect_industry_internal(file_id)
     industry = industry_response["industry"]
     
     # Get basic suggestions
@@ -230,6 +280,9 @@ async def industry_suggestions(file_id: str = Form(...)):
     elif industry == "Demand Planning/Business Forecasting":
         industry_suggestions = ["fill_time_gaps", "adjust_seasonality", "normalize_promotions"]
         description = "Demand planning data requires time series gap filling, seasonal adjustments, and promotion impact normalization."
+    elif industry == "Education":
+        industry_suggestions = ["standardize_grades", "validate_student_ids", "harmonize_course_codes"]
+        description = "Educational data often contains student records, course information, and grade data that needs standardization."
     else:
         industry_suggestions = []
         description = "General data cleaning suggestions based on detected data quality issues."
@@ -266,7 +319,10 @@ async def clean_data(file_id: str = Form(...),
                      interpolate_downtime: bool = Form(False),
                      fill_time_gaps: bool = Form(False),
                      adjust_seasonality: bool = Form(False),
-                     normalize_promotions: bool = Form(False)):
+                     normalize_promotions: bool = Form(False),
+                     standardize_grades: bool = Form(False),
+                     validate_student_ids: bool = Form(False),
+                     harmonize_course_codes: bool = Form(False)):
     
     if file_id not in file_storage:
         raise HTTPException(status_code=404, detail="File not found")
@@ -310,11 +366,16 @@ async def clean_data(file_id: str = Form(...),
         print(f"Trimmed whitespace for columns: {string_columns.tolist()}")
     
     if standardize_dates:
-        # Simple date standardization
+        # Enhanced date standardization to handle various formats
         for col in df.columns:
-            if 'date' in col.lower() or 'time' in col.lower():
+            if 'date' in col.lower() or 'time' in col.lower() or 'дата' in col.lower():  # Include Russian "дата" (date)
                 try:
-                    df[col] = pd.to_datetime(df[col], errors='ignore')
+                    # Try to convert to datetime with multiple format attempts
+                    # This will handle mixed formats in the same column
+                    df[col] = pd.to_datetime(df[col], infer_datetime_format=True, errors='coerce')
+                    
+                    # Format all dates consistently as YYYY-MM-DD
+                    df[col] = df[col].dt.strftime('%Y-%m-%d')
                 except Exception as e:
                     print(f"Could not standardize date column {col}: {e}")
     
@@ -405,13 +466,47 @@ async def clean_data(file_id: str = Form(...),
     # Demand Planning
     if fill_time_gaps:
         # Check for date columns and fill gaps
-        date_columns = [col for col in df.columns if any(keyword in col.lower() for keyword in ['date', 'time'])]
+        date_columns = [col for col in df.columns if any(keyword in col.lower() for keyword in ['date', 'time', 'дата'])]
         if date_columns:
             # Simplified time gap filling
             date_col = date_columns[0]
-            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-            df = df.sort_values(by=date_col)
+            try:
+                df[date_col] = pd.to_datetime(df[date_col], infer_datetime_format=True, errors='coerce')
+                df = df.sort_values(by=date_col)
+                # Format consistently
+                df[date_col] = df[date_col].dt.strftime('%Y-%m-%d')
+            except Exception as e:
+                print(f"Could not process date column {date_col}: {e}")
             print(f"Filled time gaps in date column: {date_col}")
+    
+    # Education
+    if standardize_grades:
+        # Look for columns that might contain grades
+        grade_columns = [col for col in df.columns if any(keyword in col.lower() for keyword in ['grade', 'score', 'gpa'])]
+        # Standardize grade values (e.g., convert letter grades to a consistent format)
+        for col in grade_columns:
+            if col in df.columns:
+                df[col] = df[col].apply(lambda x: str(x).strip().upper() if pd.notnull(x) else x)
+        print(f"Standardized grade columns: {grade_columns}")
+
+    if validate_student_ids:
+        # Look for student ID columns
+        student_id_columns = [col for col in df.columns if any(keyword in col.lower() for keyword in ['student', 'id', 'sid'])]
+        # Basic student ID validation - ensure consistent format
+        for col in student_id_columns:
+            if col in df.columns:
+                # Remove spaces and ensure consistent format
+                df[col] = df[col].apply(lambda x: str(x).replace(' ', '') if pd.notnull(x) else x)
+        print(f"Validated student ID columns: {student_id_columns}")
+
+    if harmonize_course_codes:
+        # Look for course code columns
+        course_columns = [col for col in df.columns if any(keyword in col.lower() for keyword in ['course', 'class'])]
+        # Standardize course codes
+        for col in course_columns:
+            if col in df.columns:
+                df[col] = df[col].apply(lambda x: str(x).strip().upper() if pd.notnull(x) else x)
+        print(f"Harmonized course code columns: {course_columns}")
     
     # Store cleaned data
     file_storage[file_id]['cleaned_data'] = df.copy()
@@ -421,8 +516,13 @@ async def clean_data(file_id: str = Form(...),
     csv_path = os.path.join(tmp_dir, f"{file_id}_cleaned.csv")
     xlsx_path = os.path.join(tmp_dir, f"{file_id}_cleaned.xlsx")
     
-    df.to_csv(csv_path, index=False)
-    df.to_excel(xlsx_path, index=False)
+    # Handle potential issues with large files
+    try:
+        df.to_csv(csv_path, index=False)
+        df.to_excel(xlsx_path, index=False)
+    except Exception as e:
+        print(f"Error saving files: {str(e)}")
+        # Continue with the response even if file saving fails
     
     # Return preview of cleaned data
     preview_data = df.head(20)
@@ -471,9 +571,6 @@ async def download_file(file_id: str, format: str = "csv"):
         return FileResponse(file_path, filename=f"cleaned_{file_storage[file_id]['filename'].rsplit('.', 1)[0]}.xlsx")
     else:
         raise HTTPException(status_code=400, detail="Invalid format. Use 'csv' or 'xlsx.")
-
-# Need to import FileResponse for download endpoint
-from fastapi.responses import FileResponse
 
 @app.post("/api/analyze")
 async def analyze_data_quality(file_id: str = Form(...)):
@@ -593,7 +690,7 @@ async def analyze_data_quality(file_id: str = Form(...)):
             })
     
     # 8. Check for inconsistent date formats
-    date_columns = [col for col in df.columns if any(keyword in col.lower() for keyword in ['date', 'time'])]
+    date_columns = [col for col in df.columns if any(keyword in col.lower() for keyword in ['date', 'time', 'дата'])]
     for column in date_columns:
         if df[column].dtype == 'object':
             # Try to parse dates and see if there are parsing errors
@@ -635,3 +732,114 @@ async def analyze_data_quality(file_id: str = Form(...)):
         "issues_found": len(analysis_report),
         "analysis_report": analysis_report
     }
+
+@app.post("/api/clean-issues")
+async def clean_data_based_on_issues(request: IssueBasedCleanRequest):
+    if request.file_id not in file_storage:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Get original data (or cleaned data if it exists)
+    if file_storage[request.file_id]['cleaned_data'] is not None:
+        df = file_storage[request.file_id]['cleaned_data'].copy()
+    else:
+        df = file_storage[request.file_id]['data'].copy()
+    
+    # Create a mapping of issue types to cleaning operations
+    issue_operations = {
+        "duplicate_rows": lambda df: df.drop_duplicates(),
+        "missing_values": handle_missing_values,
+        "outliers": handle_outliers,
+        "whitespace_issues": handle_whitespace,
+        "date_format_inconsistency": handle_date_formats,
+        # Add more issue-specific handlers as needed
+    }
+    
+    # Apply cleaning operations based on selected issues
+    for issue_id in request.selected_issues:
+        # Find the issue in the analysis report
+        issue = next((item for item in request.analysis_report 
+                     if f"issue-{request.analysis_report.index(item)}" == issue_id), None)
+        
+        if issue and issue["type"] in issue_operations:
+            try:
+                df = issue_operations[issue["type"]](df, issue)
+                print(f"Applied cleaning for issue: {issue['description']}")
+            except Exception as e:
+                print(f"Failed to apply cleaning for issue {issue['description']}: {str(e)}")
+    
+    # Store the newly cleaned data
+    file_storage[request.file_id]['cleaned_data'] = df.copy()
+    
+    # Save cleaned files to tmp directory
+    tmp_dir = "/tmp"
+    csv_path = os.path.join(tmp_dir, f"{request.file_id}_cleaned.csv")
+    xlsx_path = os.path.join(tmp_dir, f"{request.file_id}_cleaned.xlsx")
+    
+    df.to_csv(csv_path, index=False)
+    df.to_excel(xlsx_path, index=False)
+    
+    # Return preview of cleaned data
+    preview_data = df.head(20)
+    # Handle different data types for JSON serialization
+    for col in preview_data.columns:
+        if preview_data[col].dtype == 'datetime64[ns]':
+            preview_data[col] = preview_data[col].astype(str)
+    
+    # Replace NaN values with None for JSON serialization
+    preview_data = preview_data.where(pd.notnull(preview_data), None)
+    
+    # Convert to records
+    preview_records = preview_data.to_dict(orient='records')
+    
+    return {
+        "preview": preview_records,
+        "download_urls": {
+            "csv": f"/api/download/{request.file_id}?format=csv",
+            "xlsx": f"/api/download/{request.file_id}?format=xlsx"
+        },
+        "rows": len(df),
+        "columns": list(df.columns)
+    }
+
+def handle_missing_values(df, issue):
+    """Handle missing values - simple implementation"""
+    # This is a simplified approach - in reality, you'd want more sophisticated handling
+    return df.dropna()
+
+def handle_outliers(df, issue):
+    """Handle outliers in numeric columns"""
+    # Extract column name from issue description
+    import re
+    match = re.search(r"Column '(.+?)'", issue["description"])
+    if match:
+        column = match.group(1)
+        if column in df.columns and df[column].dtype in ['int64', 'float64']:
+            Q1 = df[column].quantile(0.25)
+            Q3 = df[column].quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 1.5 * IQR
+            upper_bound = Q3 + 1.5 * IQR
+            # Remove outliers
+            df = df[(df[column] >= lower_bound) & (df[column] <= upper_bound)]
+    return df
+
+def handle_whitespace(df, issue):
+    """Handle whitespace issues in string columns"""
+    # Apply to all object columns
+    string_columns = df.select_dtypes(include=['object']).columns
+    for col in string_columns:
+        df[col] = df[col].apply(lambda x: x.strip() if isinstance(x, str) else x)
+    return df
+
+def handle_date_formats(df, issue):
+    """Handle date format inconsistencies"""
+    # Try to standardize date columns
+    date_columns = [col for col in df.columns if any(keyword in col.lower() for keyword in ['date', 'time', 'дата'])]
+    for col in date_columns:
+        try:
+            df[col] = pd.to_datetime(df[col], infer_datetime_format=True, errors='coerce')
+            # Format consistently
+            df[col] = df[col].dt.strftime('%Y-%m-%d')
+        except Exception as e:
+            print(f"Could not standardize date column {col}: {e}")
+    return df
