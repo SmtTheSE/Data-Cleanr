@@ -1,0 +1,56 @@
+Extended File Size Support to 1GB
+================================
+
+Problem
+-------
+The previous file upload limit was 50MB, which is insufficient for large datasets that users may need to process.
+
+Solution Implemented
+--------------------
+Extended the file upload limit from 50MB to 1GB (1024MB) to support larger datasets.
+
+Changes Made
+------------
+1. Modified backend/main.py:
+   - Increased file size limit check from 50MB to 1GB
+   - Updated error message to reflect new 1GB limit
+
+Technical Details
+-----------------
+File modified: backend/main.py
+Function updated: upload_file
+
+Changed line:
+```python
+# Check file size (limit to 1GB)
+if len(content) > 1 * 1024 * 1024 * 1024:
+    raise HTTPException(status_code=400, detail="File size exceeds 1GB limit. Please upload a smaller file.")
+```
+
+Benefits
+--------
+1. Users can now upload much larger files (up to 1GB)
+2. Supports processing of extensive datasets
+3. Maintains system stability with clear limits
+4. Provides informative error messages when limits are exceeded
+
+Considerations
+--------------
+1. Large file uploads may take longer depending on network speed
+2. Processing very large datasets may require more memory
+3. Users should be aware that uploads are still limited to 1GB for system stability
+4. Very large files may take longer to process
+
+Testing
+-------
+To test the new limit:
+1. Try uploading a file between 50MB and 1GB - should work correctly
+2. Try uploading a file larger than 1GB - should get a clear size limit error
+3. Try uploading a valid file under 1GB - should work as expected
+
+Performance Notes
+-----------------
+1. Files up to 1GB are now supported
+2. Upload time will depend on network connection speed
+3. Processing time will depend on file size and system resources
+4. Memory usage will increase with larger files

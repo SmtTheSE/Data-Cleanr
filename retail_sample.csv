@@ -1,0 +1,6 @@
+Type,Days for shipping (real),Days for shipment (scheduled),Benefit per order,Sales per customer,Delivery Status,Late_delivery_risk,Category Id,Category Name,Customer City,Customer Country,Customer Segment
+Transaction1,2,3,25.5,120.0,Shipping on time,0,101,Electronics,New York,USA,Consumer
+Transaction2,5,3,18.75,150.75,Late delivery,1,102,Clothing,Chicago,USA,Corporate
+Transaction3,1,2,30.25,200.0,Advance shipping,0,103,Books,Los Angeles,USA,Home Office
+Transaction4,4,5,18.9,95.5,Late delivery,1,104,Clothing,Houston,USA,Consumer
+Transaction5,3,3,22.75,150.25,Shipping on time,0,101,Electronics,Phoenix,USA,Corporate

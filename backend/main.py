@@ -1,6 +1,7 @@
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 import pandas as pd
 import uuid
@@ -18,11 +19,75 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"]
+    expose_headers=["*"],
+    max_age=3600
 )
+
+# Custom exception handler to ensure CORS headers are always included
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Credentials": "true"
+        }
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Credentials": "true"
+        }
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {str(exc)}"},
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Credentials": "true"
+        }
+    )
 
 # In-memory storage for file data
 file_storage = {}
+
+def prepare_dataframe_for_json(df):
+    """
+    Prepare a pandas DataFrame for JSON serialization by handling NaN values
+    and other data types that are not JSON compliant.
+    """
+    try:
+        # Work with a copy to avoid modifying the original data
+        result_df = df.copy()
+        
+        # Handle different data types for JSON serialization
+        for col in result_df.columns:
+            if str(result_df[col].dtype) == 'datetime64[ns]':
+                result_df[col] = result_df[col].astype(str)
+            # Handle columns with all NaN values
+            elif result_df[col].isna().all():
+                # Fill with None values to make it JSON compliant
+                result_df[col] = [None] * len(result_df[col])
+        
+        # Replace NaN and infinity values with None for JSON serialization
+        # Using where instead of fillna as it's more reliable for this use case
+        result_df = result_df.where(pd.notnull(result_df), None)
+        # Replace infinity values with None
+        result_df = result_df.replace([float('inf'), float('-inf')], None)
+        
+        return result_df
+    except Exception as e:
+        print(f"Error in prepare_dataframe_for_json: {str(e)}")
+        raise
 
 class CleanOptions(BaseModel):
     remove_duplicates: bool = False
@@ -60,13 +125,29 @@ async def upload_file(file: UploadFile = File(...)):
         # Read file content with larger buffer
         content = await file.read()
         
+        # Check file size (limit to 1GB)
+        if len(content) > 1 * 1024 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File size exceeds 1GB limit. Please upload a smaller file.")
+        
         # Determine file type and read with pandas
         if file.filename.endswith('.csv'):
-            df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+            try:
+                # Try to decode as UTF-8 first
+                df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+            except UnicodeDecodeError:
+                # If that fails, try with latin-1 encoding
+                try:
+                    df = pd.read_csv(io.StringIO(content.decode('latin-1')))
+                except UnicodeDecodeError:
+                    raise HTTPException(status_code=400, detail="Unable to decode file. Please ensure it's a valid CSV file with UTF-8 or Latin-1 encoding.")
         elif file.filename.endswith(('.xlsx', '.xls')):
             df = pd.read_excel(io.BytesIO(content))
         else:
             raise HTTPException(status_code=400, detail="Unsupported file format. Please upload a CSV or Excel file.")
+        
+        # Validate that we have data
+        if df.empty:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty or contains no data.")
         
         # Store file data in memory
         file_storage[file_id] = {
@@ -77,21 +158,39 @@ async def upload_file(file: UploadFile = File(...)):
         
         # Return file_id and preview (first 20 rows)
         preview_data = df.head(20)
-        return {
-            "file_id": file_id,
-            "preview": preview_data.to_dict(orient='records'),
-            "columns": list(df.columns)
-        }
+        # Handle NaN values and other non-JSON compliant data types
+        preview_data = prepare_dataframe_for_json(preview_data)
+        # Convert to records - this is where the error might occur
+        preview_records = preview_data.to_dict(orient='records')
+        return JSONResponse(
+            content={
+                "file_id": file_id,
+                "preview": preview_records,
+                "columns": list(df.columns)
+            },
+            headers={
+                "Access-Control-Allow-Origin": "http://localhost:3000",
+                "Access-Control-Allow-Credentials": "true"
+            }
+        )
     
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="Unable to decode file. Please ensure it's a valid CSV or Excel file.")
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except pd.errors.EmptyDataError:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    except pd.errors.ParserError:
-        raise HTTPException(status_code=400, detail="Unable to parse file. Please ensure it's a valid CSV or Excel file.")
+        raise HTTPException(status_code=400, detail="Uploaded file is empty or contains no data.")
+    except pd.errors.ParserError as e:
+        raise HTTPException(status_code=400, detail=f"Unable to parse file. Please ensure it's a valid CSV or Excel file. Error: {str(e)}")
     except Exception as e:
         # Log the error for debugging
         print(f"Error processing file: {str(e)}")
+        print(f"Error type: {type(e)}")
+        # Log more details about the dataframe
+        try:
+            print(f"DataFrame info: {df.info()}")
+            print(f"DataFrame head: {df.head()}")
+        except:
+            pass
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 @app.post("/api/suggest")
@@ -150,18 +249,19 @@ def detect_industry_internal(file_id: str):
         "healthcare": 0,
         "manufacturing": 0,
         "demand_planning": 0,
-        "education": 0
+        "education": 0,
+        "law_enforcement": 0
     }
     
     # Check for industry-specific column patterns
     # Retail/E-commerce indicators
-    retail_keywords = ['product', 'customer', 'order', 'sku', 'price', 'sales', 'purchase', 'cart', 'inventory']
+    retail_keywords = ['product', 'customer', 'order', 'sku', 'price', 'sales', 'purchase', 'cart', 'inventory', 'transaction', 'shipping', 'delivery', 'benefit', 'segment']
     for keyword in retail_keywords:
         if any(keyword in col for col in column_names):
             industry_scores["retail_ecommerce"] += 1
     
     # Finance/Banking indicators
-    finance_keywords = ['account', 'transaction', 'balance', 'credit', 'debit', 'loan', 'interest', 'currency']
+    finance_keywords = ['account', 'transaction', 'balance', 'credit', 'debit', 'loan', 'interest', 'currency', 'benefit']
     for keyword in finance_keywords:
         if any(keyword in col for col in column_names):
             industry_scores["finance_banking"] += 1
@@ -184,61 +284,145 @@ def detect_industry_internal(file_id: str):
         if any(keyword in col for col in column_names):
             industry_scores["demand_planning"] += 1
     
-    # Education indicators (enhanced with file name/extension checking)
+    # Education indicators
     education_keywords = ['student', 'course', 'grade', 'score', 'exam', 'assignment', 'gpa', 'degree', 'major', 'faculty', 'department', 'enrollment', 'academic', 'semester', 'tuition']
     for keyword in education_keywords:
         if any(keyword in col for col in column_names):
             industry_scores["education"] += 1
     
-    # Additional education detection based on file name and extension
-    education_file_indicators = ['course', 'class', 'education', 'school', 'university', 'student', 'academy']
-    education_extensions = ['.csv', '.xlsx', '.xls']
+    # Law Enforcement indicators
+    law_enforcement_keywords = ['crime', 'offense', 'incident', 'case', 'arrest', 'charge', 'violation', 
+                               'weapon', 'battery', 'assault', 'robbery', 'theft', 'trespass', 
+                               'domestic', 'location', 'date', 'primary_type', 'description', 'updated_on']
+    for keyword in law_enforcement_keywords:
+        if any(keyword in col for col in column_names):
+            industry_scores["law_enforcement"] += 1
     
-    # Check if filename contains education-related terms
+    # Additional data content analysis
+    if not df.empty:
+        # Sample a few rows to analyze actual data content
+        sample_data = df.head(min(5, len(df)))
+        
+        # Check for retail/ecommerce-specific values
+        retail_data_indicators = ['shipping', 'delivery', 'customer', 'sales', 'benefit']
+        for col in df.columns:
+            col_lower = col.lower()
+            # Check column values for retail indicators
+            if any(indicator in col_lower for indicator in ['delivery', 'shipping']):
+                values = sample_data[col].dropna().astype(str).str.lower()
+                if any('shipping' in val or 'delivery' in val for val in values):
+                    industry_scores["retail_ecommerce"] += 1
+            
+            # Check for customer-related data
+            if 'customer' in col_lower:
+                if sample_data[col].notna().any():
+                    industry_scores["retail_ecommerce"] += 1
+                    
+            # Check for sales/benefit related data
+            if any(indicator in col_lower for indicator in ['sales', 'benefit', 'price']):
+                if sample_data[col].notna().any():
+                    industry_scores["retail_ecommerce"] += 1
+        
+        # Check for finance-specific values
+        finance_data_indicators = ['account', 'balance', 'credit', 'debit', 'loan', 'interest']
+        for col in df.columns:
+            col_lower = col.lower()
+            if any(indicator in col_lower for indicator in finance_data_indicators):
+                if sample_data[col].notna().any():
+                    industry_scores["finance_banking"] += 1
+        
+        # Check for healthcare-specific values
+        healthcare_data_indicators = ['patient', 'doctor', 'diagnosis', 'treatment', 'medical']
+        for col in df.columns:
+            col_lower = col.lower()
+            if any(indicator in col_lower for indicator in healthcare_data_indicators):
+                if sample_data[col].notna().any():
+                    industry_scores["healthcare"] += 1
+        
+        # Check for education-specific values
+        education_data_indicators = ['student', 'course', 'grade', 'score', 'exam']
+        for col in df.columns:
+            col_lower = col.lower()
+            if any(indicator in col_lower for indicator in education_data_indicators):
+                if sample_data[col].notna().any():
+                    industry_scores["education"] += 1
+    
+    # Additional education detection based on file name
+    education_file_indicators = ['course', 'class', 'education', 'school', 'university', 'student', 'academy']
     filename_lower = filename.lower()
     if any(indicator in filename_lower for indicator in education_file_indicators):
-        industry_scores["education"] += 2  # Boost score if filename indicates education
+        industry_scores["education"] += 2
     
-    # Check for typical course-related column names that might not be explicitly "education" but are common in course sales
-    course_related_columns = ['название курса', 'course', 'название', 'title', 'price', 'цена', 'кол-во', 'quantity', 'total', 'всего', 'sale', 'date', 'дата']
+    # Course-related column matching (made more specific)
+    course_related_columns = ['название курса', 'course', 'название', 'title', 'price', 'цена', 'кол-во', 'quantity', 'total', 'всего', 'sale', 'дата']
     course_matches = sum(1 for col in column_names if any(keyword in col for keyword in course_related_columns))
     
-    # If we have several course-related columns, this might be education data
-    if course_matches >= 3:  # If at least 3 course-related columns are found
+    # Increased threshold to avoid false positives
+    if course_matches >= 5:
         industry_scores["education"] += 2
     
     # Determine the industry with highest score
     detected_industry = max(industry_scores, key=industry_scores.get)
-    confidence = industry_scores[detected_industry] / max(sum(industry_scores.values()), 1)
+    max_score = industry_scores[detected_industry]
     
-    # Generate features list for the response
-    features = []
-    if detected_industry == "retail_ecommerce":
-        features = [kw for kw in retail_keywords if any(kw in col for col in column_names)]
-    elif detected_industry == "finance_banking":
-        features = [kw for kw in finance_keywords if any(kw in col for col in column_names)]
-    elif detected_industry == "healthcare":
-        features = [kw for kw in healthcare_keywords if any(kw in col for col in column_names)]
-    elif detected_industry == "manufacturing":
-        features = [kw for kw in manufacturing_keywords if any(kw in col for col in column_names)]
-    elif detected_industry == "demand_planning":
-        features = [kw for kw in demand_keywords if any(kw in col for col in column_names)]
-    elif detected_industry == "education":
-        features = [kw for kw in education_keywords if any(kw in col for col in column_names)]
+    # Calculate confidence based on matched keywords vs. total possible for that industry
+    if max_score > 0:
+        if detected_industry == "retail_ecommerce":
+            max_possible = len(retail_keywords) + 5  # +5 for potential data content matches
+        elif detected_industry == "finance_banking":
+            max_possible = len(finance_keywords) + 5
+        elif detected_industry == "healthcare":
+            max_possible = len(healthcare_keywords) + 5
+        elif detected_industry == "manufacturing":
+            max_possible = len(manufacturing_keywords) + 5
+        elif detected_industry == "demand_planning":
+            max_possible = len(demand_keywords) + 5
+        elif detected_industry == "education":
+            max_possible = len(education_keywords) + 2  # +2 for filename boost
+        elif detected_industry == "law_enforcement":
+            max_possible = len(law_enforcement_keywords) + 5
+        else:
+            max_possible = max_score
+        
+        confidence = min(max_score / max_possible, 1.0) if max_possible > 0 else 0.0
+    else:
+        confidence = 0.0
     
-    # Convert industry code to readable format
-    industry_mapping = {
-        "retail_ecommerce": "Retail/E-commerce",
-        "finance_banking": "Finance/Banking",
-        "healthcare": "Healthcare",
-        "manufacturing": "Manufacturing",
-        "demand_planning": "Demand Planning/Business Forecasting",
-        "education": "Education"
-    }
-    
-    # If no industry keywords were detected or confidence is 0, set to General
-    final_industry = "General"
-    if confidence > 0:
+    # Only classify if confidence meets minimum threshold
+    MIN_CONFIDENCE_THRESHOLD = 0.1
+    if confidence < MIN_CONFIDENCE_THRESHOLD:
+        final_industry = "General"
+        confidence = 0.0
+        features = []
+    else:
+        # Generate features list for the response
+        features = []
+        if detected_industry == "retail_ecommerce":
+            features = [kw for kw in retail_keywords if any(kw in col for col in column_names)]
+        elif detected_industry == "finance_banking":
+            features = [kw for kw in finance_keywords if any(kw in col for col in column_names)]
+        elif detected_industry == "healthcare":
+            features = [kw for kw in healthcare_keywords if any(kw in col for col in column_names)]
+        elif detected_industry == "manufacturing":
+            features = [kw for kw in manufacturing_keywords if any(kw in col for col in column_names)]
+        elif detected_industry == "demand_planning":
+            features = [kw for kw in demand_keywords if any(kw in col for col in column_names)]
+        elif detected_industry == "education":
+            features = [kw for kw in education_keywords if any(kw in col for col in column_names)]
+        elif detected_industry == "law_enforcement":
+            features = [kw for kw in law_enforcement_keywords if any(kw in col for col in column_names)]
+
+        # Convert industry code to readable format
+        industry_mapping = {
+            "retail_ecommerce": "Retail/E-commerce",
+            "finance_banking": "Finance/Banking",
+            "healthcare": "Healthcare",
+            "manufacturing": "Manufacturing",
+            "demand_planning": "Demand Planning/Business Forecasting",
+            "education": "Education",
+            "law_enforcement": "Law Enforcement"
+        }
+        
         final_industry = industry_mapping.get(detected_industry, "General")
     
     return {
@@ -533,14 +717,11 @@ async def clean_data(file_id: str = Form(...),
     
     # Replace NaN values with None for JSON serialization
     preview_data = preview_data.where(pd.notnull(preview_data), None)
+    # Replace infinity values with None
+    preview_data = preview_data.replace([float('inf'), float('-inf')], None)
     
     # Convert to records
     preview_records = preview_data.to_dict(orient='records')
-    
-    # Log for debugging
-    print(f"Preview records: {preview_records}")
-    print(f"Columns: {list(df.columns)}")
-    print(f"Number of rows: {len(df)}")
     
     return {
         "preview": preview_records,

@@ -5,7 +5,7 @@
 The Data Quality Checklist feature allows users to review and selectively apply cleaning operations based on identified data quality issues. This feature enhances the user experience by providing clear, actionable recommendations with a checklist interface.
 
 ## How It Works
-
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 1. **Data Analysis**: When a dataset is uploaded, the system automatically analyzes it for common data quality issues such as:
    - Duplicate rows
    - Missing values

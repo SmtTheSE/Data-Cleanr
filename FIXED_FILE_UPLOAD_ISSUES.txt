@@ -1,0 +1,61 @@
+Fixed File Upload Issues in DataCleanr
+=====================================
+
+Problem Identified
+------------------
+1. File uploads were failing with a 400 Bad Request error
+2. File size limits were too restrictive
+3. Error messages were not informative enough
+4. Limited encoding support for CSV files
+
+Issues Fixed
+------------
+1. Increased file size limit from default to 50MB
+2. Added explicit file size checking with clear error messages
+3. Improved error handling with more descriptive messages
+4. Added support for multiple CSV encodings (UTF-8 and Latin-1)
+5. Added data validation to ensure uploaded files contain actual data
+6. Updated server configuration to handle larger requests
+
+Technical Details
+-----------------
+File modified: backend/main.py
+Function updated: upload_file
+
+Key improvements:
+1. Added file size check with 50MB limit
+2. Enhanced CSV reading to support multiple encodings
+3. Improved error handling with specific messages for different failure cases
+4. Added data validation to check for empty files
+5. Better exception handling with proper HTTP status codes
+
+File modified: backend/start.sh
+Command updated: uvicorn command
+
+Key improvements:
+1. Added --limit-max-requests 0 parameter to remove request limits
+
+Error Handling Improvements
+---------------------------
+1. File size exceeded: "File size exceeds 50MB limit. Please upload a smaller file."
+2. Unsupported format: "Unsupported file format. Please upload a CSV or Excel file."
+3. Encoding issues: "Unable to decode file. Please ensure it's a valid CSV file with UTF-8 or Latin-1 encoding."
+4. Empty files: "Uploaded file is empty or contains no data."
+5. Parsing errors: "Unable to parse file. Please ensure it's a valid CSV or Excel file. Error: {specific error}"
+6. General errors: "Error processing file: {specific error}"
+
+Testing
+-------
+To test the fixes:
+1. Try uploading a file larger than 50MB - should get a clear size limit error
+2. Try uploading a valid CSV/Excel file under 50MB - should work correctly
+3. Try uploading a file with unsupported format - should get format error
+4. Try uploading an empty file - should get empty file error
+
+Benefits
+--------
+1. Users can now upload larger files (up to 50MB)
+2. More informative error messages help users understand what went wrong
+3. Better support for different file encodings
+4. More robust error handling prevents server crashes
+5. Clearer feedback helps users resolve issues on their own

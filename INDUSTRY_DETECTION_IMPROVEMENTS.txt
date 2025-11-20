@@ -1,0 +1,89 @@
+Industry Detection Improvements for DataCleanr
+============================================
+
+Problem Identified
+------------------
+The industry detection algorithm was incorrectly classifying crime-related datasets as "Education" with 100% confidence. This was happening due to several flaws in the detection logic:
+
+1. Overly broad matching criteria for education keywords
+2. Flawed confidence calculation method
+3. No minimum threshold for industry classification
+4. Lack of a specific category for law enforcement/crime data
+
+Changes Implemented
+-------------------
+1. Added a new "Law Enforcement" industry category with specific keywords
+2. Improved confidence calculation algorithm
+3. Added minimum confidence threshold for industry classification
+4. Made education keyword matching more specific to reduce false positives
+5. Increased threshold for course-related column matching
+
+New Industry Categories
+-----------------------
+1. Retail/E-commerce
+2. Finance/Banking
+3. Healthcare
+4. Manufacturing
+5. Demand Planning/Business Forecasting
+6. Education
+7. Law Enforcement (NEW)
+
+Law Enforcement Keywords
+-----------------------
+- crime
+- offense
+- incident
+- case
+- arrest
+- charge
+- violation
+- weapon
+- battery
+- assault
+- robbery
+- theft
+- trespass
+- domestic
+- location
+- date
+- primary_type
+- description
+- updated_on
+
+Improved Confidence Calculation
+-------------------------------
+Instead of calculating confidence as a ratio of the winning industry's score to the sum of all scores, we now:
+
+1. Calculate confidence as the ratio of matched keywords to total possible keywords for the detected industry
+2. Set a minimum confidence threshold of 0.1 (10%) for any industry classification
+3. If confidence is below the threshold, classify as "General"
+
+Education Keyword Matching Improvements
+---------------------------------------
+1. Reduced false positives by making course-related column matching more specific
+2. Increased the threshold for identifying education data from 3 to 5 matching columns
+3. Removed generic terms that could appear in non-education datasets
+
+Testing Results
+---------------
+After implementing these changes, the crime dataset that was previously misclassified as "Education" with 100% confidence should now be correctly identified as "Law Enforcement" with an appropriate confidence level.
+
+The algorithm will now:
+1. Correctly identify law enforcement datasets
+2. Reduce false positives for education classification
+3. Provide more accurate confidence scores
+4. Fall back to "General" classification when no industry matches strongly enough
+
+Technical Details
+-----------------
+File modified: backend/main.py
+Function updated: detect_industry_internal
+
+Key improvements:
+1. Added law_enforcement category to industry_scores dictionary
+2. Created law_enforcement_keywords list with relevant terms
+3. Improved confidence calculation logic
+4. Added MIN_CONFIDENCE_THRESHOLD constant
+5. Enhanced feature extraction for the new category
+6. Updated industry_mapping to include Law Enforcement
+7. Made education keyword matching more conservative

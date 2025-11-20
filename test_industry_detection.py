@@ -1,0 +1,24 @@
+import pandas as pd
+import io
+import requests
+import json
+
+# Create a sample crime dataset similar to the one in the issue
+crime_data = """date_x,primary_type_x,unique_key,description_x,location_description_x,arrest_x,domestic_x,year_x,updated_on_x,location_x,date_y,primary_type_y,description_y,location_description_y,arrest_y,domestic_y,year_y,updated_on_y,location_y
+2019-10-14 17:06:00+00:00,WEAPONS VIOLATION,11860606,RECKLESS FIREARM DISCHARGE,SIDEWALK,false,false,2019,2019-10-21 16:19:28+00:00,"(41.776310339, -87.758072322)",2019-10-14 17:06:00+00:00,WEAPONS VIOLATION,RECKLESS FIREARM DISCHARGE,SIDEWALK,false,false,2019,2019-10-21 16:19:28+00:00,"(41.776310339, -87.758072322)"
+2019-03-12 17:36:00+00:00,CRIMINAL TRESPASS,11620888,TO VEHICLE,GAS STATION,true,false,2019,2019-03-19 16:21:52+00:00,"(41.794670403, -87.631785431)",2019-03-12 17:36:00+00:00,CRIMINAL TRESPASS,TO VEHICLE,GAS STATION,true,false,2019,2019-03-19 16:21:52+00:00,"(41.794670403, -87.631785431)"
+2019-04-20 17:01:00+00:00,CRIMINAL TRESPASS,11661270,TO STATE SUP LAND,CHA APARTMENT,true,false,2019,2019-04-27 16:07:28+00:00,"(41.655185272, -87.602318059)",2019-04-20 17:01:00+00:00,CRIMINAL TRESPASS,TO STATE SUP LAND,CHA APARTMENT,true,false,2019,2019-04-27 16:07:28+00:00,"(41.655185272, -87.602318059)"
+2019-05-05 19:00:00+00:00,OFFENSE INVOLVING CHILDREN,11679045,CHILD ABUSE,RESIDENCE,false,true,2019,2019-05-12 16:04:54+00:00,"(41.829515499, -87.667931946)",2019-05-05 19:00:00+00:00,OFFENSE INVOLVING CHILDREN,CHILD ABUSE,RESIDENCE,false,true,2019,2019-05-12 16:04:54+00:00,"(41.829515499, -87.667931946)"
+2019-05-17 15:30:00+00:00,MOTOR VEHICLE THEFT,11693097,TRUCK BUS MOTOR HOME,STREET,false,false,2019,2019-05-24 16:15:50+00:00,"(41.82689451, -87.662705011)",2019-05-17 15:30:00+00:00,MOTOR VEHICLE THEFT,TRUCK BUS MOTOR HOME,STREET,false,false,2019,2019-05-24 16:15:50+00:00,"(41.82689451, -87.662705011)"
+"""
+
+# Convert to DataFrame
+df = pd.read_csv(io.StringIO(crime_data))
+
+# Save to CSV
+df.to_csv('crime_sample.csv', index=False)
+
+print("Created sample crime dataset: crime_sample.csv")
+print("Columns:", list(df.columns))
+print("\nFirst few rows:")
+print(df.head())
